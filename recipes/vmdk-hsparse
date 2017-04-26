@@ -3,6 +3,6 @@
 
 0 string KDMV\x01\x00\x00\x00
 extension vmdk
-command ./vmdk.py
-rename ./vmdk.py
+command ~/magicrescue-vmdk/vmdk.py
+rename ~/magicrescue-vmdk/vmdk.py
 
