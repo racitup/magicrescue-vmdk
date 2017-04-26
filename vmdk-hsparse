@@ -1,0 +1,8 @@
+# magicrescue recipe for hosted sparse binary vmdk files
+# requires accompanying python script and python3
+
+0 string KDMV\x01\x00\x00\x00
+extension vmdk
+command ./vmdk.py
+rename ./vmdk.py
+

@@ -1,0 +1,11 @@
+# magicrescue recipe for textual descriptor vmdk files
+# requires accompanying python script and python3
+#
+# Included in case the following comment has been removed:
+# # Disk DescriptorFile
+
+0 string version=
+extension vmdk
+command ./vmdk.py
+rename ./vmdk.py
+
