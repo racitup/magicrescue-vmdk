@@ -268,18 +268,17 @@ class VMDKDescriptor:
         if isinstance(reader, Peeker):
             ddata = reader.peek((DESCRIPTORSIZE + 1) * SECTOR_SIZE)
             start, end = findtext(ddata, searchsects=self._searchsects, sectsize=SECTOR_SIZE)
+            self.offset = start
+            self.size = len(ddata)
+            self.textonly = False
+
             if start is None:
-                raise ValueError("Descriptor not found")
-            elif start == 0 and end is None:
+                raise ValueError("Insufficient text found for Descriptor")
+            elif start == 0:
                 self.textonly = True
-                self.offset = 0
-                self.size = len(ddata)
-            elif end:
-                self.textonly = False
-                self.offset = start
+
+            if end:
                 self.size = end - start
-            else:
-                raise RuntimeError("Descriptor detection failure")
 
             #print(ddata)
             self.values = self._values(ddata)
@@ -301,7 +300,7 @@ class VMDKDescriptor:
                     vals[tup[0].decode('utf8')] = tup[1].decode('utf8').strip("'\"")
             return vals
         else:
-            return None
+            raise ValueError("No Descriptor values found")
 
     def _extents(self, data):
         """Find all extents"""
@@ -319,7 +318,7 @@ class VMDKDescriptor:
                     )]
             return vals
         else:
-            return None
+            raise ValueError("No Descriptor extents found")
 
     def info(self):
         """returns the 'public' variables"""
@@ -364,7 +363,11 @@ def vmdk_info(reader):
             return (None, descriptor)
 
     # header - input is not valid if header is not detected
-    header = SparseExtentHeader(reader)
+    try:
+        header = SparseExtentHeader(reader)
+    except ValueError:
+        header = None
+
     return (header, descriptor)
 
 def vmdk_size(reader, header, descriptor):
@@ -434,7 +437,7 @@ def vmdk_size(reader, header, descriptor):
 
     return size * SECTOR_SIZE, grainsects * SECTOR_SIZE
 
-def vmdk_name(header, descriptor):
+def vmdk_name(descriptor):
     """return the vmdk filename, or return None"""
     if descriptor:
         extent = descriptor.get_extentdict()
@@ -459,23 +462,25 @@ def vmdk_extract():
     """extract the vmdk to arg1, if vmdk data found"""
     with stdin() as reader:
         header, descriptor = vmdk_info(reader)
-        size, grainsize = vmdk_size(reader, header, descriptor)
-        with open(sys.argv[1], mode='wb') as writer:
-            if grainsize:
-                for i in range(0, size, grainsize):
-                    grain = reader.read(grainsize)
-                    writer.write(grain)
-            else:
-                writer.write(reader.read(size))
+        if header or descriptor:
+            size, grainsize = vmdk_size(reader, header, descriptor)
+            with open(sys.argv[1], mode='wb') as writer:
+                if grainsize:
+                    for i in range(0, size, grainsize):
+                        grain = reader.read(grainsize)
+                        writer.write(grain)
+                else:
+                    writer.write(reader.read(size))
 
 def vmdk_debug():
     """prints debug information about the vmdk"""
     with stdin() as reader:
         header, descriptor = vmdk_info(reader)
-        vmdk_print(header, descriptor)
-        size, grainsize = vmdk_size(reader, header, descriptor)
-        name = vmdk_name(header, descriptor)
-        print('Size: {0}/{0:#010x}, name: {1}'.format(size, name))
+        if header or descriptor:
+            vmdk_print(header, descriptor)
+            size, grainsize = vmdk_size(reader, header, descriptor)
+            name = vmdk_name(descriptor)
+            print('Size: {0}/{0:#010x}, name: {1}'.format(size, name))
 
 # magicrescue compatible extract and rename operations
 if __name__ == '__main__':
@@ -487,7 +492,7 @@ if __name__ == '__main__':
             with open(sys.argv[1], mode='rb') as fd:
                 reader = Peeker(fd)
                 header, descriptor = vmdk_info(reader)
-                name = vmdk_name(header, descriptor)
+                name = vmdk_name(descriptor)
             # may not retrieve name if descriptor is not present
             if name:
                 print("RENAME {}".format(name))

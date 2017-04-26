@@ -6,6 +6,6 @@
 
 0 string # Disk DescriptorFile
 extension vmdk
-command ~/magicrescue-vmdk/vmdk.py
-rename ~/magicrescue-vmdk/vmdk.py
+command ~/magicrescue-vmdk/vmdk.py "$1"
+rename ~/magicrescue-vmdk/vmdk.py "$1"
 
