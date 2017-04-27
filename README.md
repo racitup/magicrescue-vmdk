@@ -6,8 +6,17 @@ MagicRescue recipe for vmware vmdk files. Requires python3
 3. Else calculates the file size based on the available information and copies it
 
 Supports magicrescue rename if the vmdk has an embedded descriptor
-### Testing
-Only tested on hosted sparse vmdks
+### Support
+Supports the following:
+* Binary hosted sparse file version 1 with or without embedded text descriptor
+* Text vmdk
+
+Does not support:
+* Hosted sparse file versions 2 and 3
+* Flat files (simple extents)
+* ESXi hosted sparse files
+* Stream optimised files
+
 ### Notes
 This is not an easy file format to rescue!
 For further information, read the source comments
