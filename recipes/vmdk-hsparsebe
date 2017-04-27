@@ -1,0 +1,11 @@
+# magicrescue recipe for hosted sparse binary vmdk files
+# requires accompanying python script and python3
+# for big endian matches
+# falsely matches virtual machine log/config/code files which will
+# be rejected by the python script
+
+0 string VMDK
+extension vmdk
+command ~/magicrescue-vmdk/vmdk.py "$1"
+rename ~/magicrescue-vmdk/vmdk.py "$1"
+

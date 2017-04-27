@@ -1,5 +1,6 @@
 # magicrescue recipe for hosted sparse binary vmdk files
 # requires accompanying python script and python3
+# for little endian matches (as per spec)
 
 0 string KDMV
 extension vmdk

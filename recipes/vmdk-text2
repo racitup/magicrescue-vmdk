@@ -4,6 +4,8 @@
 # Included in case the following comment has been removed:
 # # Disk DescriptorFile
 # Specify this recipe after vmdk-text1
+# This will falsely match a lot of text config files, but the python script does
+# a more thorough check to reject them
 
 0 string version=
 extension vmdk

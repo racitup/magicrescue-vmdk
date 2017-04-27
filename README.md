@@ -13,10 +13,11 @@ Supports the following:
 
 Does not support:
 * Hosted sparse file versions 2 and 3
-* Flat files (simple extents)
-* ESXi hosted sparse files
-* Stream optimised files
+* Flat/fixed size files (are just data)
+* ESXi hosted sparse files (different format)
+* Stream optimised files (different format)
 
 ### Notes
 This is not an easy file format to rescue!
+
 For further information, read the source comments

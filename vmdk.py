@@ -14,7 +14,7 @@
 # Licensed under GPL-3.0
 # Copyright (c) 2017 Richard Case
 
-from struct import Struct
+from struct import Struct, pack
 from collections import OrderedDict
 from contextlib import contextmanager
 import sys, io, re, string, math, array
@@ -79,8 +79,7 @@ class Peeker:
 class SparseExtentHeader:
     """Reads/creates/checks typical vmdk binary header"""
     _structfmt = (
-        '<'     # little-endian
-        '4s'    #uint32       magicNumber
+        'I'     #uint32       magicNumber
         'I'     #uint32       version
         'I'     #uint32       flags
         'I'     #SectorType   capacity;
@@ -99,9 +98,11 @@ class SparseExtentHeader:
         'H'     #uint16       compressAlgorithm
         '433s'  #uint8        pad[433]
     )
+    _structle = '<'     # little-endian
+    _structbe = '>'     # big-endian
     # typical defaults
-    #magicNumber = SPARSE_MAGICNUMBER = 0x564d444b
-    magicNumber = b'KDMV'
+    #SPARSE_MAGICNUMBER = 0x564d444b
+    magicNumber = 0x564d444b
     version = 1
     # valid newline test & redundant grain table:
     _flags = 3
@@ -130,49 +131,61 @@ class SparseExtentHeader:
 
     def __init__(self, reader=None):
         """Create from file stream or create manually"""
-        self.hstruct = Struct(SparseExtentHeader._structfmt)
-        if isinstance(reader, Peeker):
-            hdata = reader.peek(self.hstruct.size)
-        elif reader is None:
-            # copy defaults to self
-            for tup in vars(SparseExtentHeader).items():
-                if not callable(tup[1]) and tup[0][0] != '_':
-                    setattr(self, tup[0], tup[1])
-            return
-        else:
-            raise TypeError("Input is not a Peeker")
+        # try both little endian and big endian
+        for self.endian in [self._structle, self._structbe]:
+            self.hstruct = Struct(self.endian + self._structfmt)
+            if isinstance(reader, Peeker):
+                hdata = reader.peek(self.hstruct.size)
+            elif reader is None:
+                # copy defaults to self
+                for tup in vars(SparseExtentHeader).items():
+                    if not callable(tup[1]) and tup[0][0] != '_':
+                        setattr(self, tup[0], tup[1])
+                return
+            else:
+                raise TypeError("SparseHeader: Input is not a Peeker")
 
-        (self.magicNumber,
-        self.version,
-        self._flags,
-        self.capacity,
-        self.grainSize,
-        self.descriptorOffset,
-        self.descriptorSize,
-        self.numGTEsPerGT,
-        self.rgdOffset,
-        self.gdOffset,
-        self.overHead,
-        self.uncleanShutdown,
-        self.singleEndLineChar,
-        self.nonEndLineChar,
-        self.doubleEndLineChar1,
-        self.doubleEndLineChar2,
-        self.compressAlgorithm,
-        self.pad) = self.hstruct.unpack(hdata[:self.hstruct.size])
+            (self.magicNumber,
+            self.version,
+            self._flags,
+            self.capacity,
+            self.grainSize,
+            self.descriptorOffset,
+            self.descriptorSize,
+            self.numGTEsPerGT,
+            self.rgdOffset,
+            self.gdOffset,
+            self.overHead,
+            self.uncleanShutdown,
+            self.singleEndLineChar,
+            self.nonEndLineChar,
+            self.doubleEndLineChar1,
+            self.doubleEndLineChar2,
+            self.compressAlgorithm,
+            self.pad) = self.hstruct.unpack(hdata[:self.hstruct.size])
 
-        self.check()
+            try:
+                self.check()
+            except ValueError:
+                if self.endian == self._structbe:
+                    raise
+            else:
+                break
 
     def check(self):
         """Checks the validity of the data"""
         if self.magicNumber != SparseExtentHeader.magicNumber:
-            raise ValueError("Wrong magic number for sparse header: {}".format(self.magicNumber))
-        if self.version != 1:
-            raise NotImplementedError("This library only supports vmdk v1")
+            magicstring = pack(self.endian + 'I', self.magicNumber).decode('utf8')
+            raise ValueError("SparseHeader: Wrong MAGIC number: {}".format(magicstring))
+        if self.version in [1, 2, 3]:
+            if self.version != 1:
+                raise NotImplementedError("SparseHeader: This library only supports vmdk v1, {} found".format(self.version))
+        else:
+            raise ValueError("SparseHeader: Wrong VERSION number: {}".format(self.version))
         if (self.singleEndLineChar != SparseExtentHeader.singleEndLineChar or
             self.nonEndLineChar != SparseExtentHeader.nonEndLineChar or
             self.doubleEndLineChar1 != SparseExtentHeader.doubleEndLineChar1):
-            raise UserWarning("Sparse header endline character comparison failed")
+            raise UserWarning("SparseHeader: Endline character comparison failed")
 
     def info(self):
         """Return a dict describing the header sorted by type and key name"""
@@ -183,6 +196,7 @@ class SparseExtentHeader:
         del desc['nonEndLineChar']
         del desc['doubleEndLineChar1']
         del desc['doubleEndLineChar2']
+        desc['flags'] = self.flags
         return desc
 
     def pack(self):
@@ -280,7 +294,7 @@ class VMDKDescriptor:
             self.textonly = False
 
             if start is None:
-                raise ValueError("Insufficient text found for Descriptor")
+                raise ValueError("Descriptor: Insufficient text found")
             elif start == 0:
                 self.textonly = True
 
@@ -291,7 +305,7 @@ class VMDKDescriptor:
             self.values = self._values(ddata)
             self.extents = self._extents(ddata)
         else:
-            raise TypeError("Input is not a Peeker")
+            raise TypeError("Descriptor: Input is not a Peeker")
 
     def _values(self, data):
         """Find all values"""
@@ -301,13 +315,19 @@ class VMDKDescriptor:
         if results:
             vals = OrderedDict()
             for tup in results:
-                if len(tup[2]) == 0:
-                    vals[tup[0].decode('utf8')] = int(tup[1].decode('utf8'), 16)
-                else:
-                    vals[tup[0].decode('utf8')] = tup[1].decode('utf8').strip("'\"")
+                key = tup[0].decode('utf8')
+                value = tup[1].decode('utf8').strip("'\"")
+                for base in [10, 16]:
+                    try:
+                        value = int(value, base)
+                    except ValueError:
+                        continue
+                    else:
+                        break
+                vals[key] = value
             return vals
         else:
-            raise ValueError("No Descriptor values found")
+            raise ValueError("Descriptor: No VALUES found")
 
     def _extents(self, data):
         """Find all extents"""
@@ -325,7 +345,7 @@ class VMDKDescriptor:
                     )]
             return vals
         else:
-            raise ValueError("No Descriptor extents found")
+            raise ValueError("Descriptor: No EXTENTS found")
 
     def info(self):
         """returns the 'public' variables"""
@@ -347,6 +367,7 @@ def vmdk_lastoffset(reader, start, size):
     end = (start + size) * SECTOR_SIZE
     alldata = reader.peek(end)
     gtdata = alldata[start * SECTOR_SIZE:end]
+    # uint32
     gtarray = array.array('I')
     gtarray.frombytes(gtdata)
     return max(gtarray)
@@ -374,14 +395,14 @@ def vmdk_info(reader, verbose=False):
     # header - input is not valid if header is not detected
     try:
         header = SparseExtentHeader(reader)
-    except ValueError as e:
+    except Exception as e:
         header = None
         if verbose:
             print(e, file=sys.stderr)
 
     return (header, descriptor)
 
-def vmdk_size(reader, header, descriptor):
+def vmdk_size(reader, header, descriptor, verbose=False):
     """finds the size of the vmdk in bytes"""
     data_sectors = None
     extent = None
@@ -422,7 +443,7 @@ def vmdk_size(reader, header, descriptor):
     # number of grain table entries, GTEs e.g. 209715200 / 128 = 1638400
     GTEs_grains = data_sectors // grainsects
     # number of grain directory entries, GDEs e.g. 1638400 / 512 = 3200
-    GTs_GDEs = GTEs_grains // numgtespergt
+    GTs_GDEs = math.ceil(GTEs_grains / numgtespergt)
     # Grain Table size in sectors e.g. ceil((512 * 4) / SECTOR_SIZE) = 4
     GTsize = math.ceil((numgtespergt * GTE_SIZE) / SECTOR_SIZE)
     # Grain Directory size in sectors e.g. ceil((3200 * 4) / 512) = 25
@@ -435,8 +456,20 @@ def vmdk_size(reader, header, descriptor):
     # data starts on grainsize boundary e.g. ceil(25671 / 128) * 128 = 201 * 128 = 25728
     headersects = math.ceil(headersize / grainsects) * grainsects
 
-    # Get last grain offset from working grain table
+    # working grain table start
     GTstart = 1 + descsize + metasize + GDsize
+
+    if verbose:
+        print("Offsets: header: {:#010x}, descriptor: {:#010x}, "
+                "RGD: {:#010x}, RGTs: {:#010x}, "
+                "GD: {:#010x}, GTs: {:#010x}, Data: {:#010x}".format(
+                    0, 1*SECTOR_SIZE,
+                    (1+descsize)*SECTOR_SIZE, (1+descsize+GDsize)*SECTOR_SIZE,
+                    (1+descsize+metasize)*SECTOR_SIZE, GTstart*SECTOR_SIZE,
+                    headersects*SECTOR_SIZE
+                ))
+
+    # Get last grain offset from working grain table
     offset = vmdk_lastoffset(reader, GTstart, GTsize * GTs_GDEs)
 
     # final offset calculation:
@@ -486,10 +519,10 @@ def vmdk_extract():
 def vmdk_debug():
     """prints debug information about the vmdk"""
     with stdin() as reader:
-        header, descriptor = vmdk_info(reader)
+        header, descriptor = vmdk_info(reader, verbose=True)
         if header or descriptor:
             vmdk_print(header, descriptor)
-            size, grainsize = vmdk_size(reader, header, descriptor)
+            size, grainsize = vmdk_size(reader, header, descriptor, verbose=True)
             name = vmdk_name(descriptor)
             print('Size: {0}/{0:#010x}, name: {1}'.format(size, name))
 
@@ -507,7 +540,9 @@ if __name__ == '__main__':
             # may not retrieve name if descriptor is not present
             if name:
                 print("RENAME {}".format(name))
+            sys.exit()
         # otherwise extract the file from stdin
         except FileNotFoundError:
-            vmdk_extract()
+            pass
+        vmdk_extract()
 
