@@ -10,6 +10,9 @@
 # magicrescue pipes data in from stdin, passes output filename as $1
 # mr expects two functions: extract and then an optional rename
 # the rename expects the new filename as stdout: RENAME file.ext
+#
+# Licensed under GPL-3.0
+# Copyright (c) 2017 Richard Case
 
 from struct import Struct
 from collections import OrderedDict
@@ -53,16 +56,20 @@ class Peeker:
 
     def read(self, size=None):
         if size is None:
-            return self.buf.read() + self.fileobj.read()
+            contents = self.buf.read() + self.fileobj.read()
+            self.buf = io.BytesIO()
+            return contents
         contents = self.buf.read(size)
         if len(contents) < size:
             contents += self.fileobj.read(size - len(contents))
+            self.buf = io.BytesIO()
         return contents
 
     def readline(self):
         line = self.buf.readline()
         if not line.endswith(b'\n'):
             line += self.fileobj.readline()
+            self.buf = io.BytesIO()
         return line
 
     def close(self):
@@ -159,13 +166,13 @@ class SparseExtentHeader:
     def check(self):
         """Checks the validity of the data"""
         if self.magicNumber != SparseExtentHeader.magicNumber:
-            raise ValueError("Wrong magic number: {}".format(self.magicNumber))
+            raise ValueError("Wrong magic number for sparse header: {}".format(self.magicNumber))
         if self.version != 1:
             raise NotImplementedError("This library only supports vmdk v1")
         if (self.singleEndLineChar != SparseExtentHeader.singleEndLineChar or
             self.nonEndLineChar != SparseExtentHeader.nonEndLineChar or
             self.doubleEndLineChar1 != SparseExtentHeader.doubleEndLineChar1):
-            raise UserWarning("Endline character comparison failed")
+            raise UserWarning("Sparse header endline character comparison failed")
 
     def info(self):
         """Return a dict describing the header sorted by type and key name"""
@@ -351,13 +358,15 @@ def vmdk_print(header, descriptor):
     if descriptor:
         print("Descriptor: {}".format(descriptor.info()))
 
-def vmdk_info(reader):
+def vmdk_info(reader, verbose=False):
     """returns header and descriptor if found"""
     # descriptor
     try:
         descriptor = VMDKDescriptor(reader)
-    except ValueError:
+    except ValueError as e:
         descriptor = None
+        if verbose:
+            print(e, file=sys.stderr)
     else:
         if descriptor.textonly:
             return (None, descriptor)
@@ -365,8 +374,10 @@ def vmdk_info(reader):
     # header - input is not valid if header is not detected
     try:
         header = SparseExtentHeader(reader)
-    except ValueError:
+    except ValueError as e:
         header = None
+        if verbose:
+            print(e, file=sys.stderr)
 
     return (header, descriptor)
 
@@ -461,7 +472,7 @@ def stdin():
 def vmdk_extract():
     """extract the vmdk to arg1, if vmdk data found"""
     with stdin() as reader:
-        header, descriptor = vmdk_info(reader)
+        header, descriptor = vmdk_info(reader, verbose=True)
         if header or descriptor:
             size, grainsize = vmdk_size(reader, header, descriptor)
             with open(sys.argv[1], mode='wb') as writer:

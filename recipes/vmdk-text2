@@ -3,6 +3,7 @@
 #
 # Included in case the following comment has been removed:
 # # Disk DescriptorFile
+# Specify this recipe after vmdk-text1
 
 0 string version=
 extension vmdk
